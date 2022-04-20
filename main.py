@@ -357,3 +357,271 @@ def abs_sobel_thresh(image, orient='x', sobel_kernel=3, thresh=(0, 255)):
     grad_binary[(scaled_sobel >= thresh[0]) & (scaled_sobel <= thresh[1])] = 1
     return grad_binary
 
+    
+def mag_thresh(image, sobel_kernel=3, mag_thresh=(0, 255)):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    abs_sobel = np.sqrt(sobelx**2 + sobely**2)
+    scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel)) 
+    mag_binary = np.zeros_like(scaled_sobel)
+    mag_binary[(scaled_sobel >= mag_thresh[0]) & (scaled_sobel <= mag_thresh[1])] = 1
+    return mag_binary
+
+def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi/2)):
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+    abs_sobelx = np.absolute(sobelx)
+    abs_sobely = np.absolute(sobely)
+    grad_dir = np.arctan2(abs_sobely, abs_sobelx)
+    dir_binary = np.zeros_like(grad_dir)
+    dir_binary[(grad_dir >= thresh[0]) & (grad_dir <= thresh[1])] = 1
+    return dir_binary
+
+def apply_thresholds(image, ksize=3):
+    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh=(10, 100))#(20, 100)
+    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh=(10, 100))
+    mag_binary = mag_thresh(image, sobel_kernel=ksize, mag_thresh=(30, 100))
+    dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0.7, 1.3))
+
+    combined = np.zeros_like(dir_binary)
+    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1))] = 1
+    
+    return combined
+
+
+def apply_color_threshold(image):
+    hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
+    s_channel = hls[:,:,2]
+    s_thresh_min = 170
+    s_thresh_max = 255
+    s_binary = np.zeros_like(s_channel)
+    s_binary[(s_channel >= s_thresh_min) & (s_channel <= s_thresh_max)] = 1
+    return s_binary
+
+
+def combine_threshold(s_binary, combined):
+    combined_binary = np.zeros_like(combined)
+    combined_binary[(s_binary == 1) |(s_binary == 255) | (combined == 1) |(combined == 255)] = 1
+    return combined_binary
+
+"""## cocatenate images"""
+
+def combine_images( lane_area_img1, edges, warp,warp_rect,warp_highlight, lane):        
+        
+        background = np.zeros_like(lane_area_img1)
+        large_img_size = (background.shape[1] - int(background.shape[1]/3),int(0.75*background.shape[0])) 
+        small_img_size=(int(background.shape[1]/3),int(0.25*background.shape[0]))
+        small_img_x_offset=0 
+        small_img_y_offset=0
+        x=int((0.75*background.shape[0])/2)
+        new_image=(int(background.shape[1]/3),x)
+
+        warp_img = cv2.resize(np.dstack((warp, warp, warp))*255,small_img_size)
+        edges_image = cv2.resize(np.dstack((edges, edges, edges))*255,small_img_size)
+        lane_img = cv2.resize(lane,new_image)
+        road = cv2.resize(lane_area_img1,large_img_size)
+        warp_rect_img = cv2.resize(warp_rect,small_img_size)
+        warp_highlight_img = cv2.resize(warp_highlight,new_image)
+
+        background[0: small_img_size[1], 0: small_img_size[0]] = edges_image
+        
+        start_offset_y = small_img_y_offset 
+        endy = start_offset_y + small_img_size[1]
+        if endy > background.shape[0]:
+          endy = background.shape[0]
+        start_offset_x = 2 * small_img_x_offset + small_img_size[0]
+        endx = start_offset_x + small_img_size[0]
+        if endx > background.shape[1]:
+          endx = background.shape[1]
+        background[start_offset_y:endy , start_offset_x: endx] = warp_img
+        
+        start_offset_y = small_img_y_offset 
+        endy = start_offset_y + small_img_size[1]
+        if endy > background.shape[0]:
+          endy = background.shape[0]
+        start_offset_x = 3 * small_img_x_offset + 2 * small_img_size[0]
+        endx = start_offset_x + small_img_size[0]
+        if endx > background.shape[1]:
+          endx = background.shape[1]
+        background[start_offset_y: endy, start_offset_x: endx] = warp_rect_img
+
+        start_offset_y = small_img_y_offset 
+        endy = x +int(0.25*background.shape[0])
+        if endy > background.shape[0]:
+          endy = background.shape[0]
+        # start_offset_x = 3 * small_img_x_offset + 3 * small_img_size[0]
+        # endx = start_offset_x + small_img_size[0]
+        if endx > background.shape[1]:
+          endx = background.shape[1]
+        background[int(0.25*background.shape[0]): endy, background.shape[1] - int(background.shape[1]/3): ] = warp_highlight_img
+
+        # start_offset_y = small_img_y_offset 
+        # endy = int(0.25*background.shape[0]) + 2*small_img_size[1]
+        # if endy > background.shape[0]:
+        #   endy = background.shape[0]
+        # start_offset_x = 3 * small_img_x_offset + 3 * small_img_size[0]
+        # endx = start_offset_x + small_img_size[0]
+        # if endx > background.shape[1]:
+        #   endx = background.shape[1]
+        background[endy: , background.shape[1] - int(background.shape[1]/3): ] = lane_img
+
+
+        # start_offset_y = small_img_y_offset 
+        # start_offset_x = 4 * small_img_x_offset + 3 * small_img_size[0]
+        background[int(0.25*background.shape[0]):  , 0:background.shape[1] - int(background.shape[1]/3)  ] = road
+        
+        
+        return background
+
+"""## process7_debug"""
+
+def process7_debug(input):
+ 
+    # step 1 get edges
+    # after_thr=thresholding(input)
+    # after_canny=canny(input)
+    # combined = combine_threshold(after_thr,after_canny)
+    # region_of_inter = region_of_interest(input)
+
+    after_canny=canny(input)
+    # plt_images(input,"input",after_canny,"after canny")
+
+    blur = cv2.blur(input,(5,5))
+
+    gradient_combined = apply_thresholds(blur) #input
+    # Color thresholding
+    s_binary = apply_color_threshold(blur) #input
+    # Combine Gradient and Color thresholding
+    combined_binary = combine_threshold(s_binary, gradient_combined)
+
+    combined = combine_threshold(after_canny,combined_binary)
+    # plt_images(input,"input",after_canny,"after canny")
+
+    ##############################################
+    # show after canny+,  combined_binary,  combined, after warp+, paint, rect, inv_rect, result+
+
+    # step 2 warp canny image
+    after_warp1=perspective_warp(combined)
+    # after_warp1=strong_warp(after_warp1)
+    # plt_images(after_canny,"after canny",after_warp,"after warp")
+    after_warp = remove_noise(after_warp1)
+    rect = Draw_rectangle(after_warp)#take 1 channel img
+    # rect = img_with_rectangle(rect1,after_warp)
+    # # rect_img=cv2.add(rect,after_warp,dtype = cv2.CV_8U)
+    inv_rect =inv_perspective_warp(rect) 
+
+    # step 3 paint area between lanes
+    # out_img, window_img, filled_lanes_img, left_curverad, right_curverad
+    paint,window_img,filled_lanes_img, left_curverad, right_curverad, center_diff = search_around_poly(after_warp)
+    # plt_images(after_warp,"after warp",filled_lanes_img,"filled lanes")
+    # plt_images(window_img,"window img",paint," painted area ")
+
+
+    # step 4 inverse perspective
+    frame =inv_perspective_warp(paint, 
+                        dst_size=(input.shape[1],input.shape[0]),
+                        src=np.float32([(0,0), (1, 0), (0,1), (1,1)]),
+                        dst=np.float32([(0.43,0.65),(0.58,0.65),(0.1,1),(1,1)]))
+
+
+    # step 5 add painting to input image
+    result = cv2.addWeighted(frame, 0.3, input, 0.7, 0,dtype = cv2.CV_8U) 
+    # plt_images(input, ' input ', result, ' result ')
+    # iny = process_image_rect(input)
+    # print("combined: ",combined.shape,combined)
+    # print("after_warp: ",after_warp.shape,after_warp)
+    curverad= (left_curverad + right_curverad)/2
+    side_pos = 'right'
+    if center_diff <= 0:
+        side_pos = 'left'
+    cv2.putText(result, 'Radius of Curvature='+str(round(curverad,3))+'m ',(50,50),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+    cv2.putText(result, 'Vehicle is '+str(abs(round(center_diff,3)))+'m '+side_pos+' of center',(50,100), cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+#combine_images( lane_area_img1(resul), edges(binary), warp(binary),warp_rect(rect),warp_highlight(paint), lane(inv_rect))
+    out = combine_images(result, combined, after_warp, rect, paint, inv_rect) # after_canny, after_warp,input must be binary
+    # cv2_imshow(out)
+
+    return out
+
+"""## process7_no_debug"""
+
+def process7(input):
+ 
+    # step 1 get edges
+    # after_thr=thresholding(input)
+    # after_canny=canny(input)
+    # combined = combine_threshold(after_thr,after_canny)
+    # region_of_inter = region_of_interest(input)
+
+    after_canny=canny(input)
+    # plt_images(input,"input",after_canny,"after canny")
+
+    blur = cv2.blur(input,(5,5))
+
+    gradient_combined = apply_thresholds(blur) #input
+    # Color thresholding
+    s_binary = apply_color_threshold(blur) #input
+    # Combine Gradient and Color thresholding
+    combined_binary = combine_threshold(s_binary, gradient_combined)
+
+    combined = combine_threshold(after_canny,combined_binary)
+    # plt_images(input,"input",after_canny,"after canny")
+    
+    # step 2 warp canny image
+    after_warp1=perspective_warp(combined)
+    # after_warp1=strong_warp(after_warp1)
+    # plt_images(after_canny,"after canny",after_warp,"after warp")
+    after_warp = remove_noise(after_warp1)
+    # rect = Draw_rectangle(after_warp)#take 1 channel img
+    # # rect_img=cv2.add(rect,after_warp,dtype = cv2.CV_8U)
+    # inv_rect =inv_perspective_warp(rect) 
+
+    # step 3 paint area between lanes
+    # out_img, window_img, filled_lanes_img, left_curverad, right_curverad
+    paint,window_img,filled_lanes_img, left_curverad, right_curverad, center_diff = search_around_poly(after_warp)
+    # plt_images(after_warp,"after warp",filled_lanes_img,"filled lanes")
+    # plt_images(window_img,"window img",paint," painted area ")
+
+
+    # step 4 inverse perspective
+    frame =inv_perspective_warp(paint, 
+                        dst_size=(input.shape[1],input.shape[0]),
+                        src=np.float32([(0,0), (1, 0), (0,1), (1,1)]),
+                        dst=np.float32([(0.43,0.65),(0.58,0.65),(0.1,1),(1,1)]))
+
+
+    # step 5 add painting to input image
+    result = cv2.addWeighted(frame, 0.3, input, 0.7, 0,dtype = cv2.CV_8U) 
+   
+    curverad= (left_curverad + right_curverad)/2
+    side_pos = 'right'
+    if center_diff <= 0:
+        side_pos = 'left'
+    cv2.putText(result, 'Radius of Curvature='+str(round(curverad,3))+'m ',(50,50),cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+    cv2.putText(result, 'Vehicle is '+str(abs(round(center_diff,3)))+'m '+side_pos+' of center',(50,100), cv2.FONT_HERSHEY_SIMPLEX,1,(255,255,255),2)
+
+    return result
+
+"""## to process a video and save the output
+
+"""
+
+def create_video(Input_video_path,Output_video_path,mode):
+  clip1 = VideoFileClip(Input_video_path)
+  if (mode=='1'):
+    video_clip = clip1.fl_image(process7_debug) 
+    video_clip.write_videofile(Output_video_path, audio=False)
+  else:
+    video_clip = clip1.fl_image(process7) 
+    video_clip.write_videofile(Output_video_path, audio=False)
+
+def main():
+    mode = sys.argv[3]
+    in_path = sys.argv[1]
+    out_path = sys.argv[2]
+    create_video(in_path,out_path,mode)
+
+if __name__ == "__main__":
+    main()
+
